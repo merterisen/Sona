@@ -26,32 +26,24 @@ st.set_page_config(
 # ─── Custom CSS ───────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-    /* ── Global ──────────────────────────────────── */
+    /* ── Global Typography ───────────────────────── */
     .stApp {
-        font-family: 'Inter', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
     }
 
     /* ── Header ──────────────────────────────────── */
     .sona-header {
         text-align: center;
-        padding: 0.5rem 1rem 0.2rem;
-        margin-bottom: 0.2rem;
+        padding: 0.75rem 1rem 0.25rem;
+        margin-bottom: 0.25rem;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.2);
     }
     .sona-header h1 {
-        font-size: 2rem;
+        font-size: 1.9rem;
         font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin-bottom: 0.1rem;
-    }
-    .sona-header p {
-        font-size: 0.9rem;
-        opacity: 0.6;
-        margin: 0;
+        color: var(--text-color);
+        letter-spacing: -0.02em;
+        margin-bottom: 0;
     }
 
     /* ── Status Badge ────────────────────────────── */
@@ -59,81 +51,113 @@ st.markdown("""
         display: inline-flex;
         align-items: center;
         gap: 0.4rem;
-        padding: 0.35rem 0.85rem;
-        border-radius: 20px;
-        font-size: 0.8rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.78rem;
         font-weight: 500;
         margin: 0.5rem auto;
-        animation: fadeIn 0.3s ease;
+        background: transparent;
+        border: 1px solid;
     }
-    .status-recording { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-    .status-transcribing { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-    .status-thinking { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
-    .status-speaking { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-    .status-ready { background: rgba(107, 114, 128, 0.1); color: #6b7280; }
-
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(-4px); }
-        to { opacity: 1; transform: translateY(0); }
+    /* Status colors: border + text only, transparent fill */
+    .status-recording   { color: #c0392b; border-color: #c0392b; }
+    .status-transcribing { color: #b7770d; border-color: #b7770d; }
+    .status-thinking    { color: var(--primary-color); border-color: var(--primary-color); }
+    .status-speaking    { color: #1a7a4a; border-color: #1a7a4a; }
+    .status-ready {
+        color: var(--text-color);
+        border-color: rgba(128, 128, 128, 0.45);
+        opacity: 0.7;
     }
 
-    /* ── Sidebar Styling ─────────────────────────── */
+    /* ── Sidebar ─────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.05) 100%);
+        background: var(--background-color);
+        border-right: 1px solid rgba(128, 128, 128, 0.2);
     }
-    section[data-testid="stSidebar"] .stSelectbox label,
-    section[data-testid="stSidebar"] .stRadio label {
-        font-weight: 500;
+    .sidebar-divider {
+        height: 1px;
+        background: rgba(128, 128, 128, 0.2);
+        margin: 0.85rem 0;
     }
 
-    /* ── Chat Messages ───────────────────────────── */
+    /* ── Chat Messages — WhatsApp Style ─────────── */
     .stChatMessage {
-        border-radius: 12px !important;
-        margin-bottom: 0.5rem !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin-bottom: 0.6rem !important;
+    }
+
+    /* Bubble wrapper */
+    .chat-bubble-wrapper {
+        display: flex;
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+    .chat-bubble-wrapper.user {
+        justify-content: flex-end;
+    }
+    .chat-bubble-wrapper.assistant {
+        justify-content: flex-start;
+    }
+
+    /* The actual bubble */
+    .chat-bubble {
+        max-width: 72%;
+        padding: 0.65rem 1rem;
+        border-radius: 18px;
+        font-size: 0.92rem;
+        line-height: 1.55;
+        word-break: break-word;
+        background: rgba(128, 128, 128, 0.15);
+        color: var(--text-color);
+        border: 1px solid rgba(128, 128, 128, 0.2);
+    }
+    .chat-bubble.user {
+        border-bottom-right-radius: 4px;
+    }
+    .chat-bubble.assistant {
+        border-bottom-left-radius: 4px;
+    }
+
+    /* Audio player inside bubble */
+    .chat-bubble audio {
+        display: block;
+        margin-top: 0.45rem;
+        width: 100%;
+        height: 32px;
+        border-radius: 8px;
+    }
+
+    /* Hide Streamlit's native chat avatars & containers when using custom bubbles */
+    .stChatMessage [data-testid="stChatMessageAvatarUser"],
+    .stChatMessage [data-testid="stChatMessageAvatarAssistant"] {
+        display: none !important;
     }
 
     /* ── Welcome Card ────────────────────────────── */
     .welcome-card {
         text-align: center;
-        padding: 1.5rem 1.5rem;
-        border-radius: 16px;
-        background: linear-gradient(135deg, rgba(102,126,234,0.08) 0%, rgba(118,75,162,0.08) 100%);
-        border: 1px solid rgba(102,126,234,0.15);
-        margin: 0.5rem 0;
+        padding: 1.5rem;
+        border-radius: 4px;
+        background: transparent;
+        border: 1px solid rgba(128, 128, 128, 0.25);
+        margin: 0.75rem 0;
     }
     .welcome-card h3 {
-        font-size: 1.25rem;
+        font-size: 1.15rem;
         font-weight: 600;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.5rem;
+        color: var(--text-color);
     }
     .welcome-card p {
-        opacity: 0.7;
-        font-size: 0.9rem;
-        line-height: 1.5;
-    }
-
-    /* ── Level Badge ─────────────────────────────── */
-    .level-badge {
-        display: inline-block;
-        padding: 0.2rem 0.6rem;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-        letter-spacing: 0.5px;
-    }
-
-    /* ── Audio Input Styling ─────────────────────── */
-    .stAudioInput {
-        margin-top: 0.5rem;
-    }
-
-    /* ── Divider ─────────────────────────────────── */
-    .sidebar-divider {
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);
-        margin: 1rem 0;
+        color: var(--text-color);
+        opacity: 0.65;
+        font-size: 0.875rem;
+        line-height: 1.55;
+        margin: 0.2rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -208,7 +232,7 @@ def _start_new_chat(llm: LLMManager):
 def render_sidebar(llm: LLMManager):
     """Sidebar Components"""
     with st.sidebar:
-        st.markdown("### ⚙️ Settings")
+        st.markdown("### Settings")
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
         # Language Selection
@@ -240,7 +264,7 @@ def render_sidebar(llm: LLMManager):
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
         # New Chat Button — applies selected settings and starts fresh
-        if st.button("🔄 New Chat", use_container_width=True, type="secondary"):
+        if st.button("New Chat", use_container_width=True, type="secondary"):
             _start_new_chat(llm)
             st.rerun()
 
@@ -291,12 +315,47 @@ def render_status():
 
 # ─── Chat Render ──────────────────────────────────────────────
 def render_chat():
-    """Renders all chat messages."""
+    """Renders all chat messages as WhatsApp-style bubbles.
+
+    User messages appear on the right, assistant messages on the left.
+    The most recent assistant audio is auto-played via a hidden HTML element.
+    """
+    import base64
+
+    last_assistant_audio = None
+
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"], avatar=msg.get("avatar")):
-            st.markdown(msg["content"])
-            if msg.get("audio"):
-                st.audio(msg["audio"], format="audio/wav")
+        role = msg["role"]  # "user" or "assistant"
+        content = msg["content"]
+        audio_bytes = msg.get("audio")
+
+        # Build audio HTML if present
+        audio_html = ""
+        if audio_bytes:
+            b64 = base64.b64encode(audio_bytes).decode()
+            audio_html = (
+                f'<audio controls src="data:audio/wav;base64,{b64}" '
+                f'style="display:block;margin-top:0.45rem;width:100%;height:32px;"></audio>'
+            )
+            if role == "assistant":
+                last_assistant_audio = b64  # track latest for autoplay
+
+        bubble_html = (
+            f'<div class="chat-bubble-wrapper {role}">'
+            f'<div class="chat-bubble {role}">'
+            f'{content}'
+            f'{audio_html}'
+            f'</div></div>'
+        )
+        st.markdown(bubble_html, unsafe_allow_html=True)
+
+    # Auto-play the latest assistant audio response
+    if last_assistant_audio:
+        autoplay_html = (
+            f'<audio autoplay src="data:audio/wav;base64,{last_assistant_audio}" '
+            f'style="display:none;"></audio>'
+        )
+        st.markdown(autoplay_html, unsafe_allow_html=True)
 
 
 # ─── Audio Processing Pipeline ────────────────────────────────
@@ -356,7 +415,8 @@ def main():
     # Header
     st.markdown(
         '<div class="sona-header">'
-        '<h1>🗣️ Sona</h1>'
+        '<h1>Sona</h1>'
+        #'<h1>🗣️ Sona</h1>'
         #'<p>Push-to-Talk Language Practice Assistant</p>'
         '</div>',
         unsafe_allow_html=True,
