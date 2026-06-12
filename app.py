@@ -179,6 +179,32 @@ def init_session_state():
 
 
 # ─── Sidebar ──────────────────────────────────────────────────
+def _start_new_chat(llm: LLMManager):
+    """Applies the currently selected settings and starts a fresh chat session."""
+    # Apply the sidebar selections as the new active settings
+    selected_lang = st.session_state.get("lang_selector", st.session_state.language)
+    selected_level = st.session_state.get("level_selector", st.session_state.level)
+
+    st.session_state.language = selected_lang
+    st.session_state.level = selected_level
+
+    # Update system prompt for the new settings
+    new_system_prompt = get_system_prompt(selected_level, selected_lang)
+    llm.set_system_prompt(new_system_prompt)
+
+    # Update TTS language/voice
+    tts = load_tts_manager()
+    tts.lang = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_lang", selected_lang)
+    tts.voice = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_voice", config.TTS_VOICE)
+
+    # Clear chat history and create a new session
+    llm.clear_history(st.session_state.session_id)
+    st.session_state.messages = []
+    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.status = "ready"
+    st.session_state.last_audio_id = None
+
+
 def render_sidebar(llm: LLMManager):
     """Sidebar Components"""
     with st.sidebar:
@@ -187,7 +213,7 @@ def render_sidebar(llm: LLMManager):
 
         # Language Selection
         lang_options = {
-            key: value["name"] 
+            key: value["name"]
             for key, value in config.SUPPORTED_LANGUAGES.items()
         }
         selected_lang = st.selectbox(
@@ -211,23 +237,24 @@ def render_sidebar(llm: LLMManager):
             key="level_selector",
         )
 
-        # Change detection
-        if selected_lang != st.session_state.language or selected_level != st.session_state.level:
-            st.session_state.language = selected_lang
-            st.session_state.level = selected_level
+        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
-            # Update system prompt
-            new_system_prompt = get_system_prompt(st.session_state.level, st.session_state.language)
-            llm.set_system_prompt(new_system_prompt)
+        # New Chat Button — applies selected settings and starts fresh
+        if st.button("🔄 New Chat", use_container_width=True, type="secondary"):
+            _start_new_chat(llm)
+            st.rerun()
 
-            # Update TTS language
-            tts = load_tts_manager()
-            tts.lang = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_lang", selected_lang)
-            tts.voice = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_voice", config.TTS_VOICE)
+        # Hint when selected settings differ from the active chat
+        settings_changed = (
+            selected_lang != st.session_state.language
+            or selected_level != st.session_state.level
+        )
+        #if settings_changed:
+        #    st.caption("Click **New Chat** to apply new settings.")
 
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
-        # Current status indicator
+        # Active Chat info
         level = st.session_state.level
         lang_info = config.SUPPORTED_LANGUAGES.get(st.session_state.language, {})
 
@@ -236,17 +263,6 @@ def render_sidebar(llm: LLMManager):
             f"Language: **{lang_info.get('name', st.session_state.language)}**\n\n"
             f"Level: **{level}**",
         )
-
-        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
-
-        # New Chat Button
-        if st.button("New Chat  ", use_container_width=True, type="secondary"):
-            llm.clear_history(st.session_state.session_id)
-            st.session_state.messages = []
-            st.session_state.session_id = str(uuid.uuid4())
-            st.session_state.status = "ready"
-            st.session_state.last_audio_id = None
-            st.rerun()
 
 
 # ─── Status Badge ─────────────────────────────────────────────
