@@ -1,5 +1,6 @@
 import uuid
 import hashlib
+import base64
 import logging
 import streamlit as st
 
@@ -200,8 +201,7 @@ def init_session_state():
         st.session_state.api_key = None
     if "status" not in st.session_state:
         st.session_state.status = "ready"
-    if "processing" not in st.session_state:
-        st.session_state.processing = False
+
     if "last_audio_id" not in st.session_state:
         st.session_state.last_audio_id = None
 
@@ -348,26 +348,31 @@ def render_chat():
 
     User messages appear on the right, assistant messages on the left.
     The most recent assistant audio is auto-played via a hidden HTML element.
+    A unique key (based on the audio hash) is embedded in the element ID so
+    the browser always treats it as a new element and plays it.
     """
-    import base64
-
     last_assistant_audio = None
+    last_assistant_audio_hash = None
+    last_assistant_mime = "audio/wav"
 
     for msg in st.session_state.messages:
         role = msg["role"]  # "user" or "assistant"
         content = msg["content"]
         audio_bytes = msg.get("audio")
+        audio_mime = msg.get("audio_mime", "audio/wav")
 
         # Build audio HTML if present
         audio_html = ""
         if audio_bytes:
             b64 = base64.b64encode(audio_bytes).decode()
             audio_html = (
-                f'<audio controls src="data:audio/wav;base64,{b64}" '
+                f'<audio controls src="data:{audio_mime};base64,{b64}" '
                 f'style="display:block;margin-top:0.45rem;width:100%;height:32px;"></audio>'
             )
             if role == "assistant":
-                last_assistant_audio = b64  # track latest for autoplay
+                last_assistant_audio = b64
+                last_assistant_audio_hash = hashlib.md5(audio_bytes).hexdigest()
+                last_assistant_mime = audio_mime
 
         bubble_html = (
             f'<div class="chat-bubble-wrapper {role}">'
@@ -378,10 +383,13 @@ def render_chat():
         )
         st.markdown(bubble_html, unsafe_allow_html=True)
 
-    # Auto-play the latest assistant audio response
-    if last_assistant_audio:
+    # Auto-play the latest assistant audio response.
+    # Use a unique element ID derived from the audio hash so the browser
+    # always sees it as a fresh element and triggers playback.
+    if last_assistant_audio and last_assistant_audio_hash:
         autoplay_html = (
-            f'<audio autoplay src="data:audio/wav;base64,{last_assistant_audio}" '
+            f'<audio id="autoplay-{last_assistant_audio_hash}" autoplay '
+            f'src="data:{last_assistant_mime};base64,{last_assistant_audio}" '
             f'style="display:none;"></audio>'
         )
         st.markdown(autoplay_html, unsafe_allow_html=True)
@@ -393,12 +401,21 @@ def process_audio(audio_bytes: bytes, stt: STTManager, llm: LLMManager, tts: TTS
     Full audio processing pipeline:
     Audio → STT → LLM → TTS → Chat
     """
+    import time
+
     lang_code = st.session_state.language
+    pipeline_start = time.perf_counter()
+
+    audio_size_kb = len(audio_bytes) / 1024
+    logger.info("⏱️ Pipeline started — audio size: %.1f KB", audio_size_kb)
 
     # 1. STT: Audio → Text
     st.session_state.status = "transcribing"
     with st.spinner("Converting speech to text..."):
+        t0 = time.perf_counter()
         user_text = stt.transcribe(audio_bytes, language=lang_code)
+        stt_duration = time.perf_counter() - t0
+        logger.info("⏱️ STT completed in %.2f seconds", stt_duration)
 
     if not user_text.strip():
         st.warning("No speech detected. Please try again.")
@@ -409,29 +426,42 @@ def process_audio(audio_bytes: bytes, stt: STTManager, llm: LLMManager, tts: TTS
     st.session_state.messages.append({
         "role": "user",
         "content": user_text,
-        "avatar": "🗣️",
     })
 
     # 2. LLM: Text → Response
     st.session_state.status = "thinking"
     with st.spinner("Generating response..."):
+        t0 = time.perf_counter()
         ai_response = llm.get_response(user_text, st.session_state.session_id)
+        llm_duration = time.perf_counter() - t0
+        logger.info("⏱️ LLM completed in %.2f seconds", llm_duration)
 
     # 3. TTS: Response → Audio
     st.session_state.status = "speaking"
     with st.spinner("Preparing voice response..."):
         try:
-            audio_response = tts.synthesize_to_bytes(ai_response)
+            t0 = time.perf_counter()
+            audio_response, audio_mime = tts.synthesize_to_bytes(ai_response)
+            tts_duration = time.perf_counter() - t0
+            logger.info("⏱️ TTS completed in %.2f seconds", tts_duration)
         except Exception as e:
             logger.error("TTS error: %s", e)
             audio_response = None
+            audio_mime = None
+            tts_duration = 0
+
+    total_duration = time.perf_counter() - pipeline_start
+    logger.info(
+        "⏱️ PIPELINE TOTAL: %.2f seconds (STT=%.2f, LLM=%.2f, TTS=%.2f)",
+        total_duration, stt_duration, llm_duration, tts_duration,
+    )
 
     # Add AI message
     st.session_state.messages.append({
         "role": "assistant",
         "content": ai_response,
-        "avatar": "🤖",
         "audio": audio_response,
+        "audio_mime": audio_mime,
     })
 
     st.session_state.status = "ready"
@@ -445,23 +475,16 @@ def main():
     st.markdown(
         '<div class="sona-header">'
         '<h1>Sona</h1>'
-        #'<h1>🗣️ Sona</h1>'
-        #'<p>Push-to-Talk Language Practice Assistant</p>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # Active Provider
+    # Load Managers (cached per provider + api_key combination)
     provider = st.session_state.provider
     api_key = st.session_state.api_key
 
-    # Load Managers
     stt = load_stt_manager(provider, api_key)
     tts = load_tts_manager(provider, api_key)
-
-    # Load LLM based on active provider (set via New Chat)
-    provider = st.session_state.provider
-    api_key = st.session_state.api_key
     llm = load_llm_manager(provider, api_key)
 
     # Set system prompt on first run
@@ -502,15 +525,13 @@ def main():
 
     # Audio processing
     if audio_value is not None:
-        # Read bytes and compute a content hash to avoid re-processing
         audio_bytes = audio_value.read()
-
         audio_hash = hashlib.md5(audio_bytes).hexdigest()
         if audio_hash != st.session_state.last_audio_id:
             st.session_state.last_audio_id = audio_hash
             process_audio(audio_bytes, stt, llm, tts)
             st.rerun()
-  
+
 
 
 if __name__ == "__main__":

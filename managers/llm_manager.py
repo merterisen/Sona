@@ -5,10 +5,9 @@ Supports Local (Ollama) and OpenAI (cloud) providers.
 """
 
 import logging
+from collections import defaultdict
 
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
-from langgraph.graph import START, StateGraph, MessagesState
-from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 import config
 
@@ -43,26 +42,9 @@ class LLMManager:
             )
 
         self._system_prompt: str = "You are a helpful assistant."
-        self._memory = InMemorySaver()
-        self._app = None
-        self._build_chain()
+        # Lightweight per-session message history (no graph/checkpoint overhead)
+        self._histories: dict[str, list] = defaultdict(list)
         logger.info("LLMManager ready.")
-
-    def _build_chain(self):
-        """(Re)builds the state graph app."""
-        workflow = StateGraph(state_schema=MessagesState)
-
-        def call_model(state: MessagesState):
-            messages = state["messages"]
-            # Prepend system prompt to the messages list
-            prompt_messages = [SystemMessage(content=self._system_prompt)] + messages
-            response = self._llm.invoke(prompt_messages)
-            return {"messages": response}
-
-        workflow.add_node("model", call_model)
-        workflow.add_edge(START, "model")
-
-        self._app = workflow.compile(checkpointer=self._memory)
 
     def set_system_prompt(self, prompt: str):
         """
@@ -89,12 +71,19 @@ class LLMManager:
             "LLM request - session=%s, message='%s'",
             session_id, user_message[:80],
         )
-        invoke_config = {"configurable": {"thread_id": session_id}}
-        response = self._app.invoke(
-            {"messages": [HumanMessage(content=user_message)]},
-            config=invoke_config,
-        )
-        result = response["messages"][-1].content
+
+        history = self._histories[session_id]
+        history.append(HumanMessage(content=user_message))
+
+        # Build full message list: system prompt + conversation history
+        messages = [SystemMessage(content=self._system_prompt)] + history
+
+        response = self._llm.invoke(messages)
+        result = response.content
+
+        # Store AI response in history
+        history.append(AIMessage(content=result))
+
         logger.info("LLM response - '%s'", result[:80])
         return result
 
@@ -108,11 +97,7 @@ class LLMManager:
         Returns:
             List of messages.
         """
-        config = {"configurable": {"thread_id": session_id}}
-        state = self._app.get_state(config)
-        if state and hasattr(state, "values") and "messages" in state.values:
-            return state.values["messages"]
-        return []
+        return list(self._histories.get(session_id, []))
 
     def clear_history(self, session_id: str = "default"):
         """
@@ -121,14 +106,5 @@ class LLMManager:
         Args:
             session_id: Conversation session ID.
         """
-        config = {"configurable": {"thread_id": session_id}}
-        state = self._app.get_state(config)
-        if state and hasattr(state, "values") and "messages" in state.values:
-            messages_to_remove = [
-                RemoveMessage(id=m.id)
-                for m in state.values["messages"]
-                if getattr(m, "id", None) is not None
-            ]
-            if messages_to_remove:
-                self._app.update_state(config, {"messages": messages_to_remove})
-            logger.info("History cleared for session %s.", session_id)
+        self._histories.pop(session_id, None)
+        logger.info("History cleared for session %s.", session_id)

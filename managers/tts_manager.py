@@ -96,9 +96,12 @@ class TTSManager:
         )
         return samples, sample_rate
 
-    def synthesize_to_bytes(self, text: str) -> bytes:
+    def synthesize_to_bytes(self, text: str) -> tuple[bytes, str]:
         """
-        Returns the audio as WAV bytes.
+        Synthesizes text to audio.
+
+        Returns:
+            Tuple of (audio_bytes, mime_type).
         """
         if self._provider == "OpenAI":
             logger.info("Synthesizing TTS (OpenAI) – voice=%s, text='%s'", self._openai_voice, text[:80])
@@ -106,12 +109,12 @@ class TTSManager:
                 model=self.model_name,
                 voice=self._openai_voice,
                 input=text,
-                response_format="wav"
+                response_format="mp3"
             )
-            return response.content
+            return response.content, "audio/mpeg"
         else:
             samples, sample_rate = self.synthesize(text)
             buffer = io.BytesIO()
             sf.write(buffer, samples, sample_rate, format="WAV")
             buffer.seek(0)
-            return buffer.read()
+            return buffer.read(), "audio/wav"
