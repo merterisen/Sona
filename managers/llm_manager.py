@@ -5,12 +5,10 @@ Supports Local (Ollama) and OpenAI (cloud) providers.
 """
 
 import logging
-from typing import Optional
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableSequence
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
+from langgraph.graph import START, StateGraph, MessagesState
+from langgraph.checkpoint.memory import InMemorySaver
 
 import config
 
@@ -44,45 +42,36 @@ class LLMManager:
                 temperature=temperature,
             )
 
-        self._store: dict[str, ChatMessageHistory] = {}
         self._system_prompt: str = "You are a helpful assistant."
-        self._chain = None
-        self._chain_with_history = None
+        self._memory = InMemorySaver()
+        self._app = None
         self._build_chain()
         logger.info("LLMManager ready.")
 
-    def _get_session_history(self, session_id: str) -> ChatMessageHistory:
-        """Returns the message history for a given session, or creates it if missing."""
-        if session_id not in self._store:
-            self._store[session_id] = ChatMessageHistory()
-        return self._store[session_id]
-
     def _build_chain(self):
-        """(Re)builds the prompt template and chain."""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", self._system_prompt),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", "{question}"),
-        ])
-        
-        # prompt fills the template and llm sends it to Local
-        self._chain = RunnableSequence(prompt, self._llm)
-        self._chain_with_history = RunnableWithMessageHistory(
-            self._chain,
-            self._get_session_history,
-            input_messages_key="question",
-            history_messages_key="history",
-        )
+        """(Re)builds the state graph app."""
+        workflow = StateGraph(state_schema=MessagesState)
+
+        def call_model(state: MessagesState):
+            messages = state["messages"]
+            # Prepend system prompt to the messages list
+            prompt_messages = [SystemMessage(content=self._system_prompt)] + messages
+            response = self._llm.invoke(prompt_messages)
+            return {"messages": response}
+
+        workflow.add_node("model", call_model)
+        workflow.add_edge(START, "model")
+
+        self._app = workflow.compile(checkpointer=self._memory)
 
     def set_system_prompt(self, prompt: str):
         """
-        Updates the system prompt and rebuilds the chain.
+        Updates the system prompt.
 
         Args:
             prompt: New system prompt text.
         """
         self._system_prompt = prompt
-        self._build_chain()
         logger.info("System prompt updated.")
 
     def get_response(self, user_message: str, session_id: str = "default") -> str:
@@ -100,12 +89,12 @@ class LLMManager:
             "LLM request - session=%s, message='%s'",
             session_id, user_message[:80],
         )
-        invoke_config = {"configurable": {"session_id": session_id}}
-        response = self._chain_with_history.invoke(
-            {"question": user_message},
+        invoke_config = {"configurable": {"thread_id": session_id}}
+        response = self._app.invoke(
+            {"messages": [HumanMessage(content=user_message)]},
             config=invoke_config,
         )
-        result = response.content
+        result = response["messages"][-1].content
         logger.info("LLM response - '%s'", result[:80])
         return result
 
@@ -119,8 +108,11 @@ class LLMManager:
         Returns:
             List of messages.
         """
-        history = self._get_session_history(session_id)
-        return history.messages
+        config = {"configurable": {"thread_id": session_id}}
+        state = self._app.get_state(config)
+        if state and hasattr(state, "values") and "messages" in state.values:
+            return state.values["messages"]
+        return []
 
     def clear_history(self, session_id: str = "default"):
         """
@@ -129,6 +121,14 @@ class LLMManager:
         Args:
             session_id: Conversation session ID.
         """
-        if session_id in self._store:
-            self._store[session_id].clear()
+        config = {"configurable": {"thread_id": session_id}}
+        state = self._app.get_state(config)
+        if state and hasattr(state, "values") and "messages" in state.values:
+            messages_to_remove = [
+                RemoveMessage(id=m.id)
+                for m in state.values["messages"]
+                if getattr(m, "id", None) is not None
+            ]
+            if messages_to_remove:
+                self._app.update_state(config, {"messages": messages_to_remove})
             logger.info("History cleared for session %s.", session_id)
