@@ -168,18 +168,18 @@ st.markdown("""
 # shared instance per manager so heavy models (Whisper, Kokoro, LLM) are not
 # reloaded on each rerun. Call these loaders anywhere — cache returns the same object.
 @st.cache_resource(show_spinner="Loading Whisper Speech-to-Text model...")
-def load_stt_manager() -> STTManager:
-    return STTManager()
+def load_stt_manager(provider: str, api_key: str | None = None) -> STTManager:
+    return STTManager(provider=provider, api_key=api_key)
 
 
 @st.cache_resource(show_spinner="Loading Kokoro Text-to-Speech model...")
-def load_tts_manager() -> TTSManager:
-    return TTSManager()
+def load_tts_manager(provider: str, api_key: str | None = None) -> TTSManager:
+    return TTSManager(provider=provider, api_key=api_key)
 
 
 @st.cache_resource(show_spinner="Connecting to the LLM...")
-def load_llm_manager() -> LLMManager:
-    return LLMManager()
+def load_llm_manager(provider: str, api_key: str | None = None) -> LLMManager:
+    return LLMManager(provider=provider, api_key=api_key)
 
 
 # ─── Start Session State ─────────────────────────────────────
@@ -194,6 +194,10 @@ def init_session_state():
         st.session_state.level = config.DEFAULT_LEVEL
     if "language" not in st.session_state:
         st.session_state.language = config.DEFAULT_LANGUAGE
+    if "provider" not in st.session_state:
+        st.session_state.provider = config.DEFAULT_PROVIDER
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = None
     if "status" not in st.session_state:
         st.session_state.status = "ready"
     if "processing" not in st.session_state:
@@ -203,33 +207,40 @@ def init_session_state():
 
 
 # ─── Sidebar ──────────────────────────────────────────────────
-def _start_new_chat(llm: LLMManager):
+def _start_new_chat():
     """Applies the currently selected settings and starts a fresh chat session."""
     # Apply the sidebar selections as the new active settings
     selected_lang = st.session_state.get("lang_selector", st.session_state.language)
     selected_level = st.session_state.get("level_selector", st.session_state.level)
+    selected_provider = st.session_state.get("provider_selector", st.session_state.provider)
+    selected_api_key = st.session_state.get("api_key_input", st.session_state.api_key)
 
     st.session_state.language = selected_lang
     st.session_state.level = selected_level
+    st.session_state.provider = selected_provider
+    st.session_state.api_key = selected_api_key if selected_provider == "OpenAI" else None
 
-    # Update system prompt for the new settings
-    new_system_prompt = get_system_prompt(selected_level, selected_lang)
-    llm.set_system_prompt(new_system_prompt)
+    # Clear prompt_initialized so system prompt is set for the new LLM
+    st.session_state.pop("prompt_initialized", None)
 
     # Update TTS language/voice
-    tts = load_tts_manager()
-    tts.lang = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_lang", selected_lang)
-    tts.voice = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("tts_voice", config.TTS_VOICE)
+    tts = load_tts_manager(st.session_state.provider, st.session_state.api_key)
+    tts.lang = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("local_tts_lang", selected_lang)
+    tts.voice = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("local_tts_voice", config.LOCAL_TTS_VOICE)
+    tts.openai_voice = config.SUPPORTED_LANGUAGES.get(selected_lang, {}).get("openai_tts_voice", config.OPENAI_TTS_VOICE)
+
+    # Clear old LLM history before switching
+    old_llm = load_llm_manager(st.session_state.provider, st.session_state.api_key)
+    old_llm.clear_history(st.session_state.session_id)
 
     # Clear chat history and create a new session
-    llm.clear_history(st.session_state.session_id)
     st.session_state.messages = []
     st.session_state.session_id = str(uuid.uuid4())
     st.session_state.status = "ready"
     st.session_state.last_audio_id = None
 
 
-def render_sidebar(llm: LLMManager):
+def render_sidebar():
     """Sidebar Components"""
     with st.sidebar:
         st.markdown("### Settings")
@@ -263,18 +274,35 @@ def render_sidebar(llm: LLMManager):
 
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
-        # New Chat Button — applies selected settings and starts fresh
-        if st.button("New Chat", use_container_width=True, type="secondary"):
-            _start_new_chat(llm)
-            st.rerun()
-
-        # Hint when selected settings differ from the active chat
-        settings_changed = (
-            selected_lang != st.session_state.language
-            or selected_level != st.session_state.level
+        # LLM Provider
+        selected_provider = st.selectbox(
+            "LLM Provider",
+            options=["Local", "OpenAI"],
+            index=["Local", "OpenAI"].index(st.session_state.provider),
+            key="provider_selector",
         )
-        #if settings_changed:
-        #    st.caption("Click **New Chat** to apply new settings.")
+
+        # API Key — only shown when OpenAI is selected in the dropdown
+        if selected_provider == "OpenAI":
+            st.text_input(
+                "OpenAI API Key",
+                type="password",
+                placeholder="sk-...",
+                key="api_key_input",
+            )
+
+        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+
+        # Disable New Chat when OpenAI is selected but no API key entered
+        new_chat_disabled = (
+            selected_provider == "OpenAI"
+            and not st.session_state.get("api_key_input")
+        )
+
+        # New Chat Button — applies selected settings and starts fresh
+        if st.button("New Chat", use_container_width=True, type="secondary", disabled=new_chat_disabled):
+            _start_new_chat()
+            st.rerun()
 
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
@@ -284,6 +312,7 @@ def render_sidebar(llm: LLMManager):
 
         st.markdown(
             f"**Active Chat**\n\n"
+            f"Provider: **{st.session_state.provider}**\n\n"
             f"Language: **{lang_info.get('name', st.session_state.language)}**\n\n"
             f"Level: **{level}**",
         )
@@ -422,10 +451,18 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # Active Provider
+    provider = st.session_state.provider
+    api_key = st.session_state.api_key
+
     # Load Managers
-    stt = load_stt_manager()
-    tts = load_tts_manager()
-    llm = load_llm_manager()
+    stt = load_stt_manager(provider, api_key)
+    tts = load_tts_manager(provider, api_key)
+
+    # Load LLM based on active provider (set via New Chat)
+    provider = st.session_state.provider
+    api_key = st.session_state.api_key
+    llm = load_llm_manager(provider, api_key)
 
     # Set system prompt on first run
     if "prompt_initialized" not in st.session_state:
@@ -434,7 +471,7 @@ def main():
         st.session_state.prompt_initialized = True
 
     # Sidebar
-    render_sidebar(llm)
+    render_sidebar()
 
     # Welcome card (if no messages yet)
     if not st.session_state.messages:
@@ -444,8 +481,9 @@ def main():
         st.markdown(
             f'<div class="welcome-card">'
             f'<h3>Ready to practice speaking?</h3>'
-            f'Language: <strong>{lang_name}</strong></p>'
-            f'Level: <strong>{st.session_state.level}</strong></p>'
+            f'<p>Provider: <strong>{provider}</strong></p>'
+            f'<p>Language: <strong>{lang_name}</strong></p>'
+            f'<p>Level: <strong>{st.session_state.level}</strong></p>'
             f'</div>',
             unsafe_allow_html=True,
         )

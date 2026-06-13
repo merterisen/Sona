@@ -3,29 +3,40 @@ Sona Configuration
 Central configuration settings.
 """
 
-# ─── Ollama / LLM ────────────────────────────────────────────
-LLM_MODEL = "llama3.1:8b"
-LLM_BASE_URL = "http://localhost:11434"
+# ─── LLM Providers ───────────────────────────────────────────
+DEFAULT_PROVIDER = "Local"
 LLM_TEMPERATURE = 0.7
 
-# ─── Faster-Whisper / STT ────────────────────────────────────
-STT_MODEL_SIZE = "base"
-STT_DEVICE = "cpu"
-STT_COMPUTE_TYPE = "int8"
+# Local (Ollama)
+LOCAL_LLM_MODEL = "llama3.1:8b"
+LOCAL_LLM_BASE_URL = "http://localhost:11434"
 
-# ─── Kokoro / TTS ────────────────────────────────────────────
-TTS_VOICE = "af_heart"
-TTS_LANG = "de"
-TTS_SPEED = 1.0
-TTS_SAMPLE_RATE = 24000
+# OpenAI (cloud)
+OPENAI_MODEL = "gpt-5-nano"
+
+# ─── Speech-to-Text (STT) ────────────────────────────────────
+LOCAL_STT_MODEL_SIZE = "base"
+LOCAL_STT_DEVICE = "cpu"
+LOCAL_STT_COMPUTE_TYPE = "int8"
+
+OPENAI_STT_MODEL = "whisper-1"
+
+# ─── Text-to-Speech (TTS) ────────────────────────────────────
+LOCAL_TTS_VOICE = "af_heart"
+LOCAL_TTS_LANG = "de"
+LOCAL_TTS_SPEED = 1.0
+LOCAL_TTS_SAMPLE_RATE = 24000
+
+OPENAI_TTS_MODEL = "tts-1"
+OPENAI_TTS_VOICE = "nova"
 
 # ─── Supported Languages ──────────────────────────────────────
 SUPPORTED_LANGUAGES = {
-    "de": {"name": "Deutsch", "flag": "🇩🇪", "tts_lang": "de", "tts_voice": "af_heart"},
+    "de": {"name": "Deutsch", "flag": "🇩🇪", "local_tts_lang": "de", "local_tts_voice": "af_heart", "openai_tts_voice": "nova"},
     # Soon
-    # "en": {"name": "English", "flag": "🇬🇧", "tts_lang": "en-us", "tts_voice": "af_heart"},
-    # "fr": {"name": "Français", "flag": "🇫🇷", "tts_lang": "fr", "tts_voice": "af_heart"},
-    # "es": {"name": "Español", "flag": "🇪🇸", "tts_lang": "es", "tts_voice": "af_heart"},
+    # "en": {"name": "English", "flag": "🇬🇧", "local_tts_lang": "en-us", "local_tts_voice": "af_heart", "openai_tts_voice": "alloy"},
+    # "fr": {"name": "Français", "flag": "🇫🇷", "local_tts_lang": "fr", "local_tts_voice": "af_heart", "openai_tts_voice": "nova"},
+    # "es": {"name": "Español", "flag": "🇪🇸", "local_tts_lang": "es", "local_tts_voice": "af_heart", "openai_tts_voice": "nova"},
 }
 
 DEFAULT_LANGUAGE = "de"

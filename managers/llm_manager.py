@@ -1,12 +1,12 @@
 """
-LLMManager - LLM Orchestration (Langchain + Ollama)
+LLMManager - LLM Orchestration (Langchain)
 Manages conversation history and generates LLM responses.
+Supports Local (Ollama) and OpenAI (cloud) providers.
 """
 
 import logging
 from typing import Optional
 
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableSequence
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -21,20 +21,28 @@ class LLMManager:
 
     def __init__(
         self,
-        model: str = config.LLM_MODEL,
-        base_url: str = config.LLM_BASE_URL,
+        provider: str = config.DEFAULT_PROVIDER,
+        api_key: str | None = None,
         temperature: float = config.LLM_TEMPERATURE):
 
-        logger.info(
-            "Starting LLMManager - model=%s, url=%s, temp=%.1f",
-            model, base_url, temperature,
-        )
+        self._provider = provider
 
-        self._llm = ChatOllama(
-            model=model,
-            base_url=base_url,
-            temperature=temperature,
-        )
+        if provider == "OpenAI":
+            from langchain_openai import ChatOpenAI
+            logger.info("Starting LLMManager - provider=OpenAI, model=%s", config.OPENAI_MODEL)
+            self._llm = ChatOpenAI(
+                model=config.OPENAI_MODEL,
+                api_key=api_key,
+                temperature=temperature,
+            )
+        else:
+            from langchain_ollama import ChatOllama
+            logger.info("Starting LLMManager - provider=Local, model=%s", config.LOCAL_LLM_MODEL)
+            self._llm = ChatOllama(
+                model=config.LOCAL_LLM_MODEL,
+                base_url=config.LOCAL_LLM_BASE_URL,
+                temperature=temperature,
+            )
 
         self._store: dict[str, ChatMessageHistory] = {}
         self._system_prompt: str = "You are a helpful assistant."
@@ -57,7 +65,7 @@ class LLMManager:
             ("human", "{question}"),
         ])
         
-        # prompt fills the template and llm sends it to Ollama
+        # prompt fills the template and llm sends it to Local
         self._chain = RunnableSequence(prompt, self._llm)
         self._chain_with_history = RunnableWithMessageHistory(
             self._chain,
