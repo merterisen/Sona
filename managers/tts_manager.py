@@ -109,6 +109,7 @@ class TTSManager:
                 model=self.model_name,
                 voice=self._openai_voice,
                 input=text,
+                speed=0.9,
                 response_format="mp3"
             )
             return response.content, "audio/mpeg"
