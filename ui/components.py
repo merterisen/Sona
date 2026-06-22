@@ -154,10 +154,11 @@ def render_sidebar(session: SonaSession) -> dict | None:
         st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
         # LLM Provider
+        provider_options = ["OpenAI"] # "Local" hidden for production
         selected_provider = st.selectbox(
             "LLM Provider",
-            options=["Local", "OpenAI"],
-            index=["Local", "OpenAI"].index(session.provider_name),
+            options=provider_options,
+            index=provider_options.index(session.provider_name) if session.provider_name in provider_options else 0,
             key="provider_selector",
         )
 

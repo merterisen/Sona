@@ -60,9 +60,13 @@ def _handle_new_chat(new_settings: dict, session: SonaSession) -> None:
     old_provider = session.provider_name
     old_api_key = st.session_state.get("_current_api_key")
 
-    # Clear old LLM history before switching
-    _, _, old_llm = _load_providers(old_provider, old_api_key)
-    old_llm.clear_history(session.session_id)
+    # Clear old LLM history before switching (only if providers were already loaded)
+    if old_api_key or old_provider == "Local":
+        try:
+            _, _, old_llm = _load_providers(old_provider, old_api_key)
+            old_llm.clear_history(session.session_id)
+        except Exception:
+            pass  # First chat — nothing to clear
 
     # Reset session with new settings
     session.reset(
@@ -95,21 +99,28 @@ def _handle_new_chat(new_settings: dict, session: SonaSession) -> None:
     # Mark prompt as initialized
     st.session_state._prompt_initialized = True
 
+    # Generate initial greeting from the assistant
+    with st.spinner("Starting conversation..."):
+        try:
+            ai_response = new_llm.get_response("Hello!", session.session_id)
+            audio_bytes, audio_mime = new_tts.synthesize(ai_response)
+        except Exception as e:
+            logger.error("Error generating first message: %s", e)
+            ai_response = "Hello! Let's start practicing."
+            audio_bytes, audio_mime = None, None
+
+        session.add_message(
+            "assistant",
+            ai_response,
+            audio=audio_bytes,
+            audio_mime=audio_mime,
+        )
+
 
 # ─── Main Application ─────────────────────────────────────────
 
 def main():
     session = _get_session()
-
-    # Load providers (cached)
-    api_key = st.session_state.get("_current_api_key")
-    stt, tts, llm = _load_providers(session.provider_name, api_key)
-
-    # Set system prompt on first run
-    if not st.session_state.get("_prompt_initialized"):
-        prompt = get_system_prompt(session.level, session.language)
-        llm.set_system_prompt(prompt)
-        st.session_state._prompt_initialized = True
 
     # Header
     render_header()
@@ -123,50 +134,60 @@ def main():
     # Welcome card (if no messages yet)
     if not session.messages:
         render_welcome(session)
+    else:
+        # Show chat messages
+        render_chat(session)
 
-    # Show chat messages
-    render_chat(session)
+        # Status badge
+        render_status(session)
 
-    # Status badge
-    render_status(session)
+        # 🎙️ Audio Input (Push-to-Talk)
+        audio_value = st.audio_input(
+            "🎙️ Record to speak",
+            key="audio_recorder",
+        )
 
-    # 🎙️ Audio Input (Push-to-Talk)
-    audio_value = st.audio_input(
-        "🎙️ Record to speak",
-        key="audio_recorder",
-    )
+        # Audio processing
+        if audio_value is not None:
+            # Load providers here when needed for audio
+            api_key = st.session_state.get("_current_api_key")
+            stt, tts, llm = _load_providers(session.provider_name, api_key)
 
-    # Audio processing
-    if audio_value is not None:
-        audio_bytes = audio_value.read()
-        audio_hash = hashlib.md5(audio_bytes).hexdigest()
+            audio_bytes = audio_value.read()
+            audio_hash = hashlib.md5(audio_bytes).hexdigest()
 
-        if audio_hash != session.last_audio_id:
-            session.last_audio_id = audio_hash
+            if audio_hash != session.last_audio_id:
+                session.last_audio_id = audio_hash
 
-            # Build pipeline and process
-            pipeline = AudioPipeline(stt=stt, llm=llm, tts=tts)
+                # Build pipeline and process
+                pipeline = AudioPipeline(stt=stt, llm=llm, tts=tts)
 
-            def update_status(status: str):
-                session.status = status
+                def update_status(status: str):
+                    session.status = status
 
-            result = pipeline.process(
-                audio_bytes=audio_bytes,
-                session_id=session.session_id,
-                language=session.language,
-                on_status=update_status,
-            )
+                try:
+                    result = pipeline.process(
+                        audio_bytes=audio_bytes,
+                        session_id=session.session_id,
+                        language=session.language,
+                        on_status=update_status,
+                    )
+                except Exception as e:
+                    logger.error("Pipeline error: %s", e)
+                    st.error(f"An error occurred: {e}")
+                    result = None
+                    update_status("ready")
 
-            if result is not None:
-                session.add_message("user", result.user_text)
-                session.add_message(
-                    "assistant",
-                    result.ai_response,
-                    audio=result.audio_bytes,
-                    audio_mime=result.audio_mime,
-                )
+                if result is not None:
+                    session.add_message("user", result.user_text)
+                    session.add_message(
+                        "assistant",
+                        result.ai_response,
+                        audio=result.audio_bytes,
+                        audio_mime=result.audio_mime,
+                    )
 
-            st.rerun()
+                st.rerun()
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ Central configuration settings, organized by provider and feature.
 """
 
 # ─── Default Settings ─────────────────────────────────────────
-DEFAULT_PROVIDER = "Local"
+DEFAULT_PROVIDER = "OpenAI" # "Local" hidden for production
 DEFAULT_LANGUAGE = "de"
 DEFAULT_LEVEL = "A2"
 LLM_TEMPERATURE = 0.7
